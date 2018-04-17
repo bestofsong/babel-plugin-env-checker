@@ -1,19 +1,22 @@
 const fs = require('fs');
 
+const HOME = `${process.env.HOME}/log.txt`;
+
 function consoleError() {
   if (!arguments.length) {
     return;
   }
   let msg = '';
   for (let ii = 0; ii < arguments.length; ii++) {
-    msg += JSON.stringify(arguments[ii], null, 4) + ',';
+    console.error(arguments[ii]);
+    msg += arguments[ii] + ',';
   }
-  if (fs.existsSync('~/log.txt')) {
-    fs.appendFileSync('~/log.txt', msg);
+  if (fs.existsSync(HOME)) {
+    fs.appendFileSync(HOME, msg);
   } else {
-    fs.writeFileSync('~/log.txt', msg);
+    fs.writeFileSync(HOME, msg);
   }
-  fs.appendFileSync('~/log.txt', '**********************');
+  fs.appendFileSync(HOME, '**********************');
 }
 
 module.exports =  (t) => {
@@ -29,7 +32,6 @@ module.exports =  (t) => {
       }
       const filename = file.opts.filename;
       const filenameRelative = file.opts.filenameRelative;
-      throw new Error('fuck' + filename);
       consoleError('*****************************************************************');
       consoleError('*****************************************************************');
       consoleError('*****************************************************************');
@@ -49,18 +51,17 @@ module.exports =  (t) => {
 
     visitor: {
       Program (path, state) {
-        throw new Error('fuck' + filename);
+        consoleError('*****************************************************************');
+        consoleError('*****************************************************************');
+        consoleError('option: ', state.opts);
+        consoleError('*****************************************************************');
+        consoleError('*****************************************************************');
         if (didHandle) {
           return;
         }
         if (!foundFile) {
           return;
         }
-        consoleError('*****************************************************************');
-        consoleError('*****************************************************************');
-        consoleError('option: ', state);
-        consoleError('*****************************************************************');
-        consoleError('*****************************************************************');
       },
     },
   };
