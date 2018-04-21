@@ -1,6 +1,6 @@
 {
-  "name": "babel-plugin-env-checker",
-  "version": "2.0.1",
+  "name": "babel-plugin-static-assert",
+  "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
