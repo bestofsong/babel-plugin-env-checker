@@ -1,28 +1,54 @@
 const _ = require('lodash');
 const fs = require('fs');
 const P = require('path');
+const ASTQ = require('astq');
+
 
 const CWD_ALSO_ASSUMED_TO_BE_PROJECT_ROOT = process.cwd();
 
 
+const PACKAGE_INFO = JSON.parse(
+  fs.readFileSync(P.join(__dirname, 'package.json')).toString()
+);
+const PACKAGE_NAME = PACKAGE_INFO.name;
+const PACKAGE_NAME_SHORT = PACKAGE_NAME.replace(/babel-plugin-/i, '');
+
+
+function getBabelrcOpts() {
+  // FIXME: more robust way of getting opts
+  const path = P.join(CWD_ALSO_ASSUMED_TO_BE_PROJECT_ROOT, '.babelrc');
+  if (!fs.existsSync(path)) {
+    return {};
+  }
+  const str = fs.readFileSync(path).toString();
+  const obj = JSON.parse(str);
+
+  const { plugins } = obj;
+  const found = (plugins || []).find((it) => {
+    if (Array.isArray(it)) {
+      return it[0] === PACKAGE_NAME_SHORT || it[0] === PACKAGE_NAME;
+    }
+    return it === PACKAGE_NAME_SHORT || it === PACKAGE_NAME;
+  });
+  return found ? found[1] : {};
+}
+
+
 const CONSTRAINT_VISITORS = {
-  enum (constraint, node, t) {
-    const name = _.get(node, 'declaration.declarations.0.id.name');
-    const init = _.get(node, 'declaration.declarations.0.init');
-    // fixme: currently only support string literal
-    const value = init.value;
-
-    if (!t.isStringLiteral(init)) {
-      throw new Error(`ExportNamedDeclaration ${name} has exported none string literal(${JSON.stringify(init)}), not supported or some kind of error`);
+  enum (node, constraint) {
+    const { values } = constraint.value;
+    const actualValue = node.init.value;
+    if (!values.some(it => it === actualValue)) {
+      throw new Error(`Constraint violation: "${constraint.selector}":
+        none of enum values(${JSON.stringify(values)}) match actualValue(${actualValue})!`);
     }
-
-    if (_.get(constraint, 'value.type') !== 'enum') {
-      console.error('not implemented yet');
-    }
-    const values = _.get(constraint, 'value.values');
-    const ok = values.some(v => v === value);
-    if (!ok) {
-      throw new Error(`ExportNamedDeclaration ${name} has invalid value: ${value}, should be one of: ${JSON.stringify(values)}`);
+  },
+  literal (node, constraint) {
+    const { value } = constraint.value;
+    const actualValue = node.init.value;
+    if (actualValue !== value) {
+      throw new Error(`Constraint violation: "${constraint.selector}":
+        actualValue(${actualValue}) does not match constraint value(${value})!`);
     }
   },
 };
@@ -42,11 +68,15 @@ function getFileConstraints(currentFile, opts) {
 
 
 module.exports =  ({ types: t }) => {
+  const { fileConstraints } = getBabelrcOpts();
+  if (_.isEmpty(fileConstraints)) {
+    return {};
+  }
+
   let currentFile = '';
-  let didHandle = false;
+  const astq = new ASTQ();
 
   return {
-    name: 'env-checker',
     pre (file) {
       currentFile = file.opts.filename;
     },
@@ -54,38 +84,22 @@ module.exports =  ({ types: t }) => {
       currentFile = '';
     },
     visitor: {
-      ExportNamedDeclaration: {
+      Program: {
         exit(path, state) {
           const fileConstraints = getFileConstraints(currentFile, state.opts);
           if (!fileConstraints) {
             return;
           }
-
-          const node = path.node;
-          const declaration = _.get(node, 'declaration');
-          if (!t.isVariableDeclaration(declaration)) {
-            // fixme: what about other kind of declaration
-            return;
-          }
-
-          const constraints = fileConstraints.constraints;
+          const { constraints } = fileConstraints;
           constraints.forEach((constraint) => {
-            if (constraint.type !== 'export') {
-              throw new Error(`Constraint type: ${constraint.type} not supported yet.`);
+            const { selector, value } = constraint;
+            const res = astq.query(path.node, selector);
+            if (!res || !res.length) {
+              throw new Error(`Constraint"${JSON.stringify(constraint)}" match nothing`);
             }
-
-            const declarator = _.get(node, 'declaration.declarations.0');
-            const name = _.get(node, 'declaration.declarations.0.id.name');
-            if (constraint.name !== name) {
-              return;
-            }
-
-            const visitor = CONSTRAINT_VISITORS[constraint.value.type];
-            if (!visitor) {
-              throw new Error(`不支持的export变量类型，目前仅支持：${JSON.stringify(Object.keys(CONSTRAINT_VISITORS))}`);
-            }
-
-            visitor(constraint, node, t);
+            res.forEach((matchedNode) => {
+              CONSTRAINT_VISITORS[value.type](matchedNode, constraint);
+            });
           });
         },
       },
