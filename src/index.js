@@ -2,13 +2,14 @@ const _ = require('lodash');
 const fs = require('fs');
 const P = require('path');
 const ASTQ = require('astq');
+const CONSTRAINT_VISITORS = require('./constraint');
 
 
 const CWD_ALSO_ASSUMED_TO_BE_PROJECT_ROOT = process.cwd();
 
 
 const PACKAGE_INFO = JSON.parse(
-  fs.readFileSync(P.join(__dirname, 'package.json')).toString()
+  fs.readFileSync(P.join(__dirname, '/../package.json')).toString()
 );
 const PACKAGE_NAME = PACKAGE_INFO.name;
 const PACKAGE_NAME_SHORT = PACKAGE_NAME.replace(/babel-plugin-/i, '');
@@ -32,26 +33,6 @@ function getBabelrcOpts() {
   });
   return found ? found[1] : {};
 }
-
-
-const CONSTRAINT_VISITORS = {
-  enum (node, constraint) {
-    const { values } = constraint.value;
-    const actualValue = node.init.value;
-    if (!values.some(it => it === actualValue)) {
-      throw new Error(`Constraint violation: "${constraint.selector}":
-        none of enum values(${JSON.stringify(values)}) match actualValue(${actualValue})!`);
-    }
-  },
-  literal (node, constraint) {
-    const { value } = constraint.value;
-    const actualValue = node.init.value;
-    if (actualValue !== value) {
-      throw new Error(`Constraint violation: "${constraint.selector}":
-        actualValue(${actualValue}) does not match constraint value(${value})!`);
-    }
-  },
-};
 
 
 function getFileConstraints(currentFile, opts) {
@@ -92,13 +73,21 @@ module.exports =  ({ types: t }) => {
           }
           const { constraints } = fileConstraints;
           constraints.forEach((constraint) => {
-            const { selector, value } = constraint;
+            const { selector, def } = constraint;
             const res = astq.query(path.node, selector);
             if (!res || !res.length) {
               throw new Error(`Constraint"${JSON.stringify(constraint)}" match nothing`);
             }
             res.forEach((matchedNode) => {
-              CONSTRAINT_VISITORS[value.type](matchedNode, constraint);
+              const validator = CONSTRAINT_VISITORS[def.type];
+              if (!validator) {
+                throw new Error(`constraint type(${def.type}) is not supported`);
+              }
+              validator.call(
+                CONSTRAINT_VISITORS,
+                matchedNode,
+                constraint.def,
+                { t, selector: constraint.selector });
             });
           });
         },
